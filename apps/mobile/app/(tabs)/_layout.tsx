@@ -1,6 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { Link, Tabs } from 'expo-router';
-import { Pressable } from 'react-native';
+import { Pressable, Text } from 'react-native';
+import { signOutUser } from '@yard-1/firebase';
 
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -80,6 +81,26 @@ export default function TabLayout() {
               tintColor={color}
               size={28}
             />
+          ),
+          headerRight: () => (
+            <Pressable
+              onPress={() => {
+                void signOutUser();
+              }}
+              style={{ marginRight: 15 }}
+            >
+              {({ pressed }) => (
+                <Text
+                  style={{
+                    color: Colors[colorScheme].tint,
+                    fontSize: 16,
+                    opacity: pressed ? 0.5 : 1,
+                  }}
+                >
+                  Sign out
+                </Text>
+              )}
+            </Pressable>
           ),
         }}
       />

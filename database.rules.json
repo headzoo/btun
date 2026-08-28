@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "storage": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$itemId": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.hasChildren(['createdAt', 'message']) && newData.child('createdAt').isNumber() && newData.child('message').isString() && newData.child('message').val().length > 0 && newData.child('message').val().length <= 10000 && (!data.exists() || newData.child('createdAt').val() === data.child('createdAt').val())"
+        }
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

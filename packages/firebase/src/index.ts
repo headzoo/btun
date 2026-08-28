@@ -1,5 +1,10 @@
 export type { FirebaseConfig } from './config';
+export { formatAuthError, signInWithEmail, signOutUser, signUpWithEmail } from './auth';
 export { useRealtimeValue } from './hooks';
 export type { RealtimeValueState } from './hooks';
 export { getFirebase, initFirebase, isFirebaseInitialized } from './init';
 export type { FirebaseServices } from './init';
+export { useAuth } from './useAuth';
+export type { AuthState } from './useAuth';
+export { MAX_STORAGE_MESSAGE_LENGTH, saveStorageItem, storagePath } from './storage';
+export type { StorageItem, StorageItemMap } from './storage';

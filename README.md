@@ -20,6 +20,7 @@ yard-1/
 ├── apps/desktop/         # Electron desktop app (@yard-1/desktop)
 ├── apps/mobile/          # Expo mobile app (@yard-1/mobile)
 ├── packages/firebase/    # Shared Firebase init + useRealtimeValue
+├── database.rules.json   # Realtime Database security rules (manual deploy)
 ├── AGENTS.md             # Agent / contributor workflow notes
 └── package.json          # Root scripts
 ```
@@ -47,6 +48,28 @@ cp apps/mobile/.env.example apps/mobile/.env.local
 Fill in the values from the Firebase console. Desktop uses the `VITE_FIREBASE_*` prefix; mobile uses `EXPO_PUBLIC_FIREBASE_*`. See [`.env.example`](.env.example) for the shared variable names.
 
 Required fields for both apps: API key, auth domain, database URL, and project ID.
+
+### Firebase Authentication
+
+Both apps require a signed-in user (email/password). Before first launch:
+
+1. In the [Firebase Console](https://console.firebase.google.com/), open **Authentication** → **Sign-in method** and enable the **Email/Password** provider.
+2. Create a test account with the in-app **Create account** flow, or add a user under **Authentication** → **Users**.
+
+Unauthenticated users are sent to the sign-in screen and cannot use the app until they sign in.
+
+### Realtime Database
+
+Canonical data lives under `storage/{uid}/{pushId}` — one bucket per authenticated user. Each item has:
+
+| Field       | Type     | Notes                                            |
+| ----------- | -------- | ------------------------------------------------ |
+| `createdAt` | `number` | Milliseconds since epoch; immutable after create |
+| `message`   | `string` | Non-empty; max 10000 characters                  |
+
+Security rules are versioned in [`database.rules.json`](database.rules.json). Only the signed-in owner may read or write their subtree; everything else is denied. After changing that file, paste the JSON into the Firebase Console (**Realtime Database** → **Rules**) and publish — there is no automated deploy yet.
+
+Shared TypeScript types (`StorageItem`, `StorageItemMap`) and `storagePath(uid)` live in `@yard-1/firebase`.
 
 ## Development
 
@@ -86,7 +109,7 @@ Use **pnpm only** — do not use npm or yarn.
 
 - **`@yard-1/desktop`** — Electron renderer/main app with a Firebase RTDB panel
 - **`@yard-1/mobile`** — Expo tabs app with a Firebase RTDB screen
-- **`@yard-1/firebase`** — `initFirebase`, `useRealtimeValue`, and shared config types
+- **`@yard-1/firebase`** — `initFirebase`, `useRealtimeValue`, auth helpers, and storage path/types
 
 ## License
 
