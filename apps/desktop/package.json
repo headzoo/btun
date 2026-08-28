@@ -1,0 +1,37 @@
+{
+  "name": "@yard-1/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Yard-1 Electron desktop app",
+  "type": "module",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:changed": "vitest run --changed"
+  },
+  "dependencies": {
+    "@yard-1/firebase": "workspace:*",
+    "electron-updater": "^6.8.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.16",
+    "vite-plugin-electron": "^1.0.1",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "vitest": "^3.2.4"
+  }
+}

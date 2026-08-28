@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+build/
+.expo/
+.expo-shared/
+*.jsbundle
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing / coverage
+coverage/
+
+# Electron
+apps/desktop/release/
+apps/desktop/dist-electron/
+dist-electron/
+
+# Misc
+*.local
+.turbo/
