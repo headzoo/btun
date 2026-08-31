@@ -10,6 +10,7 @@ import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
 import { ensureFirebase } from '@/lib/firebase';
 import { hasPendingSharedPayloads } from '@/lib/pendingShare';
+import { useVault } from '@/hooks/useVault';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -50,6 +51,11 @@ export default function RootLayout() {
   return <RootLayoutNav />;
 }
 
+function AuthenticatedVaultSync() {
+  useVault();
+  return null;
+}
+
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
   const { user } = useAuth();
@@ -76,6 +82,7 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      {user ? <AuthenticatedVaultSync /> : null}
       <Stack>
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

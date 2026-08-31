@@ -4,7 +4,6 @@ import App from './App';
 
 import './index.css';
 
-import './demos/ipc';
 import { ensureFirebase } from './lib/firebase';
 
 // Initialize Firebase as early as possible (no-op if env vars are missing).

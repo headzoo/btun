@@ -1,79 +1,51 @@
-# electron-vite-react
+# Buddy Tunnel Desktop
 
-[![awesome-vite](https://awesome.re/mentioned-badge.svg)](https://github.com/vitejs/awesome-vite)
-![GitHub stars](https://img.shields.io/github/stars/electron-vite/electron-vite-react?color=fa6470)
-![GitHub issues](https://img.shields.io/github/issues/electron-vite/electron-vite-react?color=d8b22d)
-![GitHub license](https://img.shields.io/github/license/electron-vite/electron-vite-react)
-[![Required Node.js >= 20.19.0 || >= 22.12.0](https://img.shields.io/static/v1?label=node&message=%3E=20.19.0%20||%20%3E=22.12.0&logo=node.js&color=3f893e)](https://nodejs.org/about/releases)
+Electron + Vite desktop client for the Buddy Tunnel file vault.
 
-English | [简体中文](README.zh-CN.md)
+## Quick start
 
-## Overview
+From the monorepo root:
 
-- Ready out of the box.
-- Based on the official [template-react-ts](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts).
-- Supports Electron and Node.js APIs in the renderer process.
-- Supports C/C++ native addons.
-- Includes debugger configuration.
-- Easy to extend to multiple windows.
-
-## Quick Start
-
-```sh
-# clone the project
-git clone https://github.com/electron-vite/electron-vite-react.git
-
-# enter the project directory
-cd electron-vite-react
-
-# install dependencies
+```bash
 pnpm install
-
-# start development
-pnpm dev
+cp apps/desktop/.env.example apps/desktop/.env.local
+# Fill in VITE_FIREBASE_* including VITE_FIREBASE_STORAGE_BUCKET
+pnpm dev:desktop
 ```
 
-## Available Scripts
+Sign in with email/password. The **Files** tab lists direct children of the configured vault directory.
 
-- `pnpm dev`: start the Vite dev server.
-- `pnpm build`: build the renderer and package the app with electron-builder.
-- `pnpm preview`: preview the production web build locally.
-- `pnpm test`: run Vitest unit tests.
-- `pnpm test:e2e`: build the test mode bundle and run Playwright tests.
-- `pnpm typecheck`: run the TypeScript type checker.
+## Vault behavior
 
-## Project Structure
+- **Default root:** `Documents/Buddy Tunnel` (or `~/Buddy Tunnel` if Documents is unavailable). Stored in Electron `userData`, not inside the vault folder.
+- **Flat list:** Subdirectories, `.buddy-tunnel.json`, and temp files are ignored.
+- **Import:** Drag/drop into the window, paste files from the clipboard (OS-dependent formats), or use import actions in the toolbar.
+- **Export:** Drag a row out of the list to copy the file path for external apps.
+- **Sync:** Local watcher events debounce into a full scan of direct children; changes reconcile to Firebase immediately while the app is active.
+- **Duplicate names:** Remote preferred names may collide locally; the app assigns `stem.2.ext`, `stem.3.ext`, etc. without changing RTDB unless you rename the file in-app.
+- **Inline threshold:** UTF-8 text ≤ 10,000 characters (no NUL) stays in RTDB; larger text and all binaries use Firebase Storage.
 
-```tree
-├── build/            Packaging assets
-├── dist-electron/    Compiled Electron output
-├── electron/         Main-process and preload source
-│   ├── main/
-│   └── preload/
-├── public/           Static assets
-├── src/              Renderer source code
-│   ├── components/
-│   │   └── update/
-│   ├── demos/
-│   └── type/
-└── test/             Unit and end-to-end tests
-    └── e2e/
-```
+## Security
 
-Files under `electron/` are compiled into `dist-electron/`.
+Renderer access to the vault is only through `window.buddyTunnel` — a typed, channel-allowlisted preload API. Generic filesystem read/write, `ipcRenderer`, and Node integration are not exposed to the renderer for vault operations.
 
-## Security Note
+Run `pnpm test:e2e` to verify startup shell and preload surface (requires a built test bundle).
 
-The `renderer: {}` preset in `vite.config.ts` is only a Vite adapter that polyfills Electron, Node.js APIs and native modules for the renderer process. It is not the same as enabling Node integration. If you want direct Node.js access in the renderer, enable `nodeIntegration` in the `BrowserWindow` webPreferences in the main process and review the security impact carefully.
+## Scripts
 
-## Features
+| Command          | Purpose                                           |
+| ---------------- | ------------------------------------------------- |
+| `pnpm dev`       | Start Electron in development (from this package) |
+| `pnpm build`     | Production build                                  |
+| `pnpm test`      | Vitest unit tests (vault sync logic)              |
+| `pnpm test:e2e`  | Playwright Electron smoke tests                   |
+| `pnpm typecheck` | TypeScript                                        |
+| `pnpm lint`      | ESLint                                            |
 
-1. Electron auto update with docs in [src/components/update/README.md](src/components/update/README.md).
-2. Vitest unit tests and Playwright end-to-end tests.
-3. TailwindCSS v4.
+## Platform notes
 
-## Resources
+- **Clipboard paste:** Chromium file paste works everywhere; OS-specific file-list clipboard parsing varies on Windows, macOS, and Linux. Unsupported combinations show a visible error rather than silently failing.
+- **Rename detection:** Uses `dev`/`ino` identity when available, with hash/size/mtime fallback; otherwise degrades to delete + create.
+- **Account switch:** Sign out stops watchers. An index belonging to another UID is not overwritten — choose a different vault root or re-associate explicitly.
 
-- Auto-update docs: [English](src/components/update/README.md) | [简体中文](src/components/update/README.zh-CN.md)
-- [C/C++ addons, Node.js modules - Pre-Bundling](https://github.com/electron-vite/vite-plugin-electron-renderer#dependency-pre-bundling)
-- [dependencies vs devDependencies](https://github.com/electron-vite/vite-plugin-electron-renderer#dependencies-vs-devdependencies)
+See the root [README](../../README.md) for Firebase rules deployment and the [acceptance matrix](../../docs/vault-acceptance-matrix.md) for manual verification status.

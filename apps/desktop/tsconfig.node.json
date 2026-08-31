@@ -1,10 +1,13 @@
 {
   "compilerOptions": {
     "composite": true,
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "verbatimModuleSyntax": true,
+    "strict": true,
     "types": ["node"],
     "skipLibCheck": true,
     "resolveJsonModule": true,

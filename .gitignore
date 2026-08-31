@@ -45,3 +45,4 @@ dist-electron/
 # Misc
 *.local
 .turbo/
+*.scratch.*

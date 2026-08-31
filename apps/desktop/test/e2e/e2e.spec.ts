@@ -68,28 +68,61 @@ test.afterAll(async () => {
   }
 });
 
-test.describe('[electron-vite-react] e2e tests', () => {
-  test('startup', async () => {
+test.describe('[buddy-tunnel] desktop shell', () => {
+  test('startup title', async () => {
     const title = await page.title();
-    expect(title).toBe('Electron + Vite + React');
+    expect(title).toBe('Buddy Tunnel');
   });
 
-  test('should be home page is load correctly', async () => {
+  test('shows auth or configuration-safe vault shell', async () => {
+    await page.waitForSelector('h1', { timeout: 15000 });
     const h1 = await page.$('h1');
-    const title = await h1?.textContent();
-    expect(title).toBe('A sharp starter with Tailwind-first styling.');
+    const title = (await h1?.textContent())?.trim() ?? '';
+    expect([
+      'Sign in',
+      'Create account',
+      'Firebase is not configured',
+      'Buddy Tunnel',
+      'Files',
+    ]).toContain(title);
   });
 
-  test('should be count button can click', async () => {
-    const countButton = await page.$('button:has-text("Increment counter")');
-    const countValue = await page.$('div.text-5xl');
+  test('preload exposes narrow buddyTunnel API without filesystem primitives', async () => {
+    const bridge = await page.evaluate(() => {
+      const api = (window as unknown as { buddyTunnel?: Record<string, unknown> }).buddyTunnel;
+      if (!api || typeof api !== 'object') {
+        return { present: false as const };
+      }
+      return {
+        present: true as const,
+        keys: Object.keys(api).sort(),
+        hasRequire: typeof (window as unknown as { require?: unknown }).require !== 'undefined',
+        hasProcess: typeof (window as unknown as { process?: unknown }).process !== 'undefined',
+        hasFs: typeof (window as unknown as { fs?: unknown }).fs !== 'undefined',
+      };
+    });
 
-    const valueBeforeClick = await countValue?.textContent();
-    expect(valueBeforeClick).toBe('0');
-
-    await countButton?.click();
-
-    const valueAfterClick = await countValue?.textContent();
-    expect(valueAfterClick).toBe('1');
+    expect(bridge.present).toBe(true);
+    if (!bridge.present) {
+      return;
+    }
+    expect(bridge.hasRequire).toBe(false);
+    expect(bridge.hasProcess).toBe(false);
+    expect(bridge.hasFs).toBe(false);
+    expect(bridge.keys).toEqual(
+      expect.arrayContaining([
+        'start',
+        'stop',
+        'list',
+        'importDroppedFiles',
+        'importClipboard',
+        'open',
+        'reveal',
+        'startDrag',
+        'configureRoot',
+      ]),
+    );
+    expect(bridge.keys).not.toContain('importPaths');
+    expect(bridge.keys).not.toEqual(expect.arrayContaining(['readFile', 'writeFile', 'readdir']));
   });
 });

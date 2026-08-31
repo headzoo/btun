@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@yard-1/firebase": "workspace:*",
+    "@yard-1/vault": "workspace:*",
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {

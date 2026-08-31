@@ -7,9 +7,11 @@ import { electronSimple } from 'vite-plugin-electron/multi-env';
 import { notBundle } from 'vite-plugin-electron/plugin';
 import pkg from './package.json';
 
+// Workspace packages ship TypeScript source; bundle them into Electron main/preload
+// instead of leaving them external (Node ESM cannot resolve extensionless TS imports).
 const external = Object.keys(
   'dependencies' in pkg ? (pkg.dependencies as Record<string, string>) : {},
-);
+).filter((dep) => !dep.startsWith('@yard-1/'));
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
@@ -31,7 +33,7 @@ export default defineConfig(({ command }) => {
       electronSimple({
         main: {
           input: 'electron/main/index.ts',
-          plugins: [notBundle()],
+          plugins: [notBundle({ filter: external })],
           options: {
             build: {
               sourcemap,
@@ -45,7 +47,7 @@ export default defineConfig(({ command }) => {
         },
         preload: {
           input: 'electron/preload/index.ts',
-          plugins: [notBundle()],
+          plugins: [notBundle({ filter: external })],
           options: {
             build: {
               sourcemap: sourcemap ? 'inline' : undefined, // #332

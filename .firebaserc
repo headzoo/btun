@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "buddy-tunnel"
+  },
+  "targets": {
+    "buddy-tunnel": {
+      "database": {
+        "default": [
+          "buddy-tunnel-default-rtdb"
+        ]
+      }
+    }
+  }
+}

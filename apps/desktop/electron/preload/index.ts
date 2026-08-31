@@ -1,26 +1,150 @@
-import { ipcRenderer, contextBridge } from 'electron';
+import { ipcRenderer, contextBridge, webUtils } from 'electron';
+import type {
+  BuddyTunnelApi,
+  ImportedFileResult,
+  MaterializeInput,
+  RenameInput,
+} from '../main/vault-api';
+import { BUDDY_TUNNEL_CHANNELS } from '../main/vault-api';
+import type { ExpectedLocalEffect, LocalVaultEvent, VaultIndex, VaultResult } from '@yard-1/vault';
 
-// --------- Expose some API to the Renderer process ---------
+const UPDATER_INVOKE_CHANNELS = new Set([
+  'check-update',
+  'start-download',
+  'cancel-download',
+  'quit-and-install',
+  'open-win',
+]);
+
+const UPDATER_LISTEN_CHANNELS = new Set([
+  'main-process-message',
+  'update-can-available',
+  'update-error',
+  'download-progress',
+  'update-downloaded',
+]);
+
+function pathsFromDroppedFiles(files: File[]): string[] {
+  const paths: string[] = [];
+  for (const file of files) {
+    try {
+      const filePath = webUtils.getPathForFile(file);
+      if (filePath) {
+        paths.push(filePath);
+      }
+    } catch {
+      // Skip files without a resolvable path (e.g. browser-only blobs).
+    }
+  }
+  return paths;
+}
+
+const buddyTunnel: BuddyTunnelApi = {
+  start(uid) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.start, uid);
+  },
+  stop() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.stop);
+  },
+  getStatus() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.getStatus);
+  },
+  list() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.list);
+  },
+  listDirectChildren() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.listChildren);
+  },
+  loadIndex() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.loadIndex);
+  },
+  saveIndex(index: VaultIndex) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.saveIndex, index);
+  },
+  configureRoot() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.configureRoot);
+  },
+  useDefaultRoot() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.useDefaultRoot);
+  },
+  importDroppedFiles(files) {
+    return ipcRenderer.invoke(
+      BUDDY_TUNNEL_CHANNELS.importDroppedFiles,
+      pathsFromDroppedFiles(files),
+    ) as Promise<VaultResult<ImportedFileResult[]>>;
+  },
+  importClipboard() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.importClipboard);
+  },
+  readBytes(localName) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.readBytes, localName);
+  },
+  materialize(input: MaterializeInput) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.materialize, input);
+  },
+  writeAtomic(localName, bytes) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.writeAtomic, localName, bytes);
+  },
+  rename(input: RenameInput) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.rename, input);
+  },
+  remove(localName) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.remove, localName);
+  },
+  open(localName) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.open, localName);
+  },
+  reveal(localName) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.reveal, localName);
+  },
+  revealRoot() {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.revealRoot);
+  },
+  startDrag(localName) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.startDrag, localName);
+  },
+  registerExpectedEffect(effect: ExpectedLocalEffect) {
+    return ipcRenderer.invoke(BUDDY_TUNNEL_CHANNELS.registerExpectedEffect, effect);
+  },
+  onLocalChange(listener: (event: LocalVaultEvent) => void) {
+    const handler = (_event: Electron.IpcRendererEvent, payload: LocalVaultEvent) => {
+      listener(payload);
+    };
+    ipcRenderer.on(BUDDY_TUNNEL_CHANNELS.localEvent, handler);
+    return () => {
+      ipcRenderer.off(BUDDY_TUNNEL_CHANNELS.localEvent, handler);
+    };
+  },
+};
+
+contextBridge.exposeInMainWorld('buddyTunnel', buddyTunnel);
+
+// Keep updater/demo IPC available, but only on an allowlisted channel set.
 contextBridge.exposeInMainWorld('ipcRenderer', {
-  on(...args: Parameters<typeof ipcRenderer.on>) {
-    const [channel, listener] = args;
+  on(channel: string, listener: (...args: unknown[]) => void) {
+    if (!UPDATER_LISTEN_CHANNELS.has(channel)) {
+      throw new Error(`Blocked ipcRenderer.on channel: ${channel}`);
+    }
     return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args));
   },
-  off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args;
-    return ipcRenderer.off(channel, ...omit);
+  off(channel: string, listener: (...args: unknown[]) => void) {
+    if (!UPDATER_LISTEN_CHANNELS.has(channel)) {
+      throw new Error(`Blocked ipcRenderer.off channel: ${channel}`);
+    }
+    return ipcRenderer.off(channel, listener as never);
   },
-  send(...args: Parameters<typeof ipcRenderer.send>) {
-    const [channel, ...omit] = args;
+  send(channel: string, ...omit: unknown[]) {
+    if (!UPDATER_LISTEN_CHANNELS.has(channel) && !UPDATER_INVOKE_CHANNELS.has(channel)) {
+      throw new Error(`Blocked ipcRenderer.send channel: ${channel}`);
+    }
     return ipcRenderer.send(channel, ...omit);
   },
-  invoke(...args: Parameters<typeof ipcRenderer.invoke>) {
-    const [channel, ...omit] = args;
+  invoke(channel: string, ...omit: unknown[]) {
+    if (!UPDATER_INVOKE_CHANNELS.has(channel)) {
+      throw new Error(`Blocked ipcRenderer.invoke channel: ${channel}`);
+    }
     return ipcRenderer.invoke(channel, ...omit);
   },
-
-  // You can expose other APTs you need here.
-  // ...
 });
 
 // --------- Preload scripts loading ---------

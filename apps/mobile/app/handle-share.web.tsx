@@ -8,7 +8,9 @@ export default function HandleShareScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Share not available</Text>
       <Text style={styles.body}>
-        Receiving shared text and links requires the iOS or Android app.
+        Incoming shares from other apps (files, photos, video, audio, text, and links) work only in
+        the iOS or Android Buddy Tunnel app. This web route stays harmless and does not accept share
+        payloads.
       </Text>
     </View>
   );

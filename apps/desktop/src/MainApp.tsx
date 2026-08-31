@@ -1,14 +1,276 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ChangeEvent, DragEvent, ReactNode } from 'react';
 import { signOutUser, useAuth } from '@yard-1/firebase';
+import type { FileEntry } from '@yard-1/vault';
 import UpdateElectron from '@/components/update';
-import { FirebasePanel } from '@/components/FirebasePanel';
-import logoVite from './assets/logo-vite.svg';
-import logoElectron from './assets/logo-electron.svg';
-import logoTailwind from './assets/logo-tailwindcss.svg';
+import { VaultList } from '@/components/vault/VaultList';
+import { VaultSettings } from '@/components/vault/VaultSettings';
+import { VaultToolbar } from '@/components/vault/VaultToolbar';
+import { useVault } from '@/hooks/useVault';
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export function MainApp() {
-  const [count, setCount] = useState(0);
   const { user } = useAuth();
+  const vault = useVault();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const dragDepth = useRef(0);
+
+  const blocked =
+    vault.rootStatus.kind === 'owner-mismatch' ||
+    vault.rootStatus.kind === 'permission' ||
+    vault.rootStatus.kind === 'error';
+  const vaultStarting = vault.rootStatus.kind === 'idle';
+  const listInteractive = !blocked && vault.rootStatus.kind === 'ready';
+  const caseSensitiveNames = typeof navigator !== 'undefined' && /linux/i.test(navigator.platform);
+
+  async function importFileList(files: File[]) {
+    if (!listInteractive || files.length === 0) {
+      return;
+    }
+    setImporting(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const result = await window.buddyTunnel.importDroppedFiles(files);
+      if (!result.ok) {
+        setActionError(result.error.message);
+        return;
+      }
+      await vault.commands.refresh({ localOnly: true });
+      const count = result.value.length;
+      setActionNotice(
+        count === 0
+          ? 'No files were imported.'
+          : `Imported ${count} file${count === 1 ? '' : 's'}.`,
+      );
+    } catch (error) {
+      setActionError(errorMessage(error, 'Import failed.'));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  useEffect(() => {
+    function onWindowPaste(event: ClipboardEvent) {
+      if (!listInteractive || importing) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+      const files = event.clipboardData?.files;
+      if (files && files.length > 0) {
+        event.preventDefault();
+        void importFileList(Array.from(files));
+      }
+    }
+    window.addEventListener('paste', onWindowPaste);
+    return () => window.removeEventListener('paste', onWindowPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paste gate uses interactive/importing flags
+  }, [listInteractive, importing, vault.commands]);
+
+  async function pasteImport() {
+    if (!listInteractive || importing) {
+      return;
+    }
+    setImporting(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const result = await window.buddyTunnel.importClipboard();
+      if (!result.ok) {
+        if (result.error.code === 'unsupported') {
+          setActionError(
+            'File paste from the OS clipboard is not supported in this environment. Use Add files or drag and drop instead.',
+          );
+        } else {
+          setActionError(result.error.message);
+        }
+        return;
+      }
+      await vault.commands.refresh({ localOnly: true });
+      const count = result.value.length;
+      setActionNotice(
+        count === 0
+          ? 'Clipboard did not contain importable files.'
+          : `Pasted ${count} file${count === 1 ? '' : 's'}.`,
+      );
+    } catch (error) {
+      setActionError(errorMessage(error, 'Paste import failed.'));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function onDragEnter(event: DragEvent<HTMLElement>) {
+    if (!listInteractive) {
+      return;
+    }
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDropActive(true);
+  }
+
+  function onDragOver(event: DragEvent<HTMLElement>) {
+    if (!listInteractive) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onDragLeave(event: DragEvent<HTMLElement>) {
+    if (!listInteractive) {
+      return;
+    }
+    event.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) {
+      setDropActive(false);
+    }
+  }
+
+  function onDrop(event: DragEvent<HTMLElement>) {
+    if (!listInteractive) {
+      return;
+    }
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDropActive(false);
+    const files = Array.from(event.dataTransfer.files ?? []);
+    void importFileList(files);
+  }
+
+  async function openEntry(entry: FileEntry) {
+    if (entry.status !== 'ready') {
+      setActionError('Wait until the file is ready before opening.');
+      return;
+    }
+    setActionError(null);
+    const result = await window.buddyTunnel.open(entry.localName);
+    if (!result.ok) {
+      setActionError(result.error.message);
+    }
+  }
+
+  async function revealEntry(entry: FileEntry) {
+    setActionError(null);
+    const result = await window.buddyTunnel.reveal(entry.localName);
+    if (!result.ok) {
+      setActionError(result.error.message);
+    }
+  }
+
+  async function dragOut(entry: FileEntry) {
+    if (entry.status !== 'ready') {
+      return;
+    }
+    setActionError(null);
+    const result = await window.buddyTunnel.startDrag(entry.localName);
+    if (!result.ok) {
+      setActionError(result.error.message);
+    }
+  }
+
+  async function renameEntry(entry: FileEntry, nextName: string) {
+    setBusyId(entry.id);
+    setActionError(null);
+    try {
+      await vault.commands.rename(entry.id, nextName);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) {
+      return;
+    }
+    setDeleting(true);
+    setActionError(null);
+    setBusyId(deleteTarget.id);
+    try {
+      await vault.commands.remove(deleteTarget.id);
+      setActionNotice(`Deleted ${deleteTarget.localName}.`);
+      setDeleteTarget(null);
+    } catch (error) {
+      setActionError(errorMessage(error, 'Delete failed.'));
+    } finally {
+      setDeleting(false);
+      setBusyId(null);
+    }
+  }
+
+  let blockingPanel: ReactNode = null;
+  if (vault.rootStatus.kind === 'owner-mismatch') {
+    blockingPanel = (
+      <section className="rounded-[1.75rem] border border-amber-200 bg-amber-50 p-6 text-amber-950">
+        <h2 className="text-lg font-semibold">Vault belongs to another account</h2>
+        <p className="mt-2 text-sm leading-6">
+          {vault.rootStatus.message} Buddy Tunnel will not ingest or overwrite this folder. Choose a
+          different empty folder or restore the default vault location.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void vault.commands.changeRoot('choose')}
+            className="rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"
+          >
+            Choose another folder…
+          </button>
+          <button
+            type="button"
+            onClick={() => void vault.commands.changeRoot('default')}
+            className="rounded-2xl border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-950 hover:border-amber-400"
+          >
+            Use default vault
+          </button>
+        </div>
+      </section>
+    );
+  } else if (vault.rootStatus.kind === 'permission' || vault.rootStatus.kind === 'error') {
+    blockingPanel = (
+      <section className="rounded-[1.75rem] border border-rose-200 bg-rose-50 p-6 text-rose-950">
+        <h2 className="text-lg font-semibold">Vault unavailable</h2>
+        <p className="mt-2 text-sm leading-6">{vault.rootStatus.message}</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void vault.commands.changeRoot('choose')}
+            className="rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"
+          >
+            Choose folder…
+          </button>
+          <button
+            type="button"
+            onClick={() => void vault.commands.changeRoot('default')}
+            className="rounded-2xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-950"
+          >
+            Use default vault
+          </button>
+          <button
+            type="button"
+            onClick={() => void vault.commands.refresh()}
+            className="rounded-2xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-950"
+          >
+            Retry
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-50 px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
@@ -18,116 +280,157 @@ export function MainApp() {
         <div className="absolute bottom-0 left-1/2 h-72 w-[46rem] -translate-x-1/2 bg-gradient-to-r from-cyan-200/0 via-cyan-300/45 to-cyan-200/0 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-8">
-        <div className="flex items-center justify-between gap-4">
-          <p className="truncate text-sm text-slate-600">
-            Signed in as <span className="font-medium text-slate-900">{user?.email}</span>
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              void signOutUser();
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6">
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-800">
+              Buddy Tunnel
+            </p>
+            <p className="mt-1 truncate text-sm text-slate-600">
+              Signed in as <span className="font-medium text-slate-900">{user?.email}</span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <UpdateElectron />
+            <button
+              type="button"
+              onClick={() => {
+                void signOutUser();
+              }}
+              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-slate-50"
+            >
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <VaultToolbar
+          disabled={!listInteractive}
+          importing={importing}
+          settingsOpen={settingsOpen}
+          fileInputRef={fileInputRef}
+          onPickFiles={() => fileInputRef.current?.click()}
+          onFilesChosen={(event: ChangeEvent<HTMLInputElement>) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void importFileList(files);
+          }}
+          onPasteImport={() => void pasteImport()}
+          onRefresh={() => void vault.commands.refresh()}
+          onToggleSettings={() => setSettingsOpen((open) => !open)}
+        />
+
+        {settingsOpen ? (
+          <VaultSettings
+            busy={importing || busyId !== null}
+            onChangeRoot={async (mode) => {
+              setActionError(null);
+              await vault.commands.changeRoot(mode);
+              setActionNotice(
+                mode === 'default'
+                  ? 'Switched to the default vault folder.'
+                  : 'Vault folder updated.',
+              );
             }}
-            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-slate-50"
+            onClose={() => setSettingsOpen(false)}
+          />
+        ) : null}
+
+        {vaultStarting ? (
+          <p className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+            Starting vault…
+          </p>
+        ) : null}
+
+        {actionError ? (
+          <p
+            className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+            role="alert"
           >
-            Sign out
-          </button>
-        </div>
+            {actionError}
+          </p>
+        ) : null}
+        {actionNotice ? (
+          <p className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+            {actionNotice}
+          </p>
+        ) : null}
 
-        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white/90 shadow-[0_24px_70px_-40px_rgba(14,116,144,0.35)] backdrop-blur">
-          <div className="grid gap-8 p-6 md:grid-cols-[1.15fr_0.85fr] md:p-10">
-            <div className="flex flex-col justify-between gap-8">
-              <div className="space-y-6">
-                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-1.5 text-xs font-medium uppercase tracking-[0.24em] text-cyan-800">
-                  Electron + Vite + React + Tailwind
-                </div>
-                <div className="space-y-4">
-                  <h1 className="max-w-xl text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl">
-                    Modern starter, cleaner rhythm, unified visual language.
-                  </h1>
-                  <p className="max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-                    Refined spacing, balanced contrast, and consistent cards make the page feel more
-                    polished while keeping all demo functionality intact.
-                  </p>
-                </div>
-              </div>
+        {blockingPanel}
 
-              <a
-                href="https://github.com/electron-vite/electron-vite-react"
-                target="_blank"
-                rel="noreferrer"
-                className="group inline-flex w-fit items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:border-cyan-300 hover:shadow-md"
-              >
-                <span className="relative flex h-10 w-10 items-center justify-center">
-                  <img src={logoVite} className="h-8 w-8" alt="Vite logo" />
-                  <img
-                    src={logoElectron}
-                    className="absolute h-8 w-8 motion-safe:animate-spin [animation-duration:20s]"
-                    alt="Electron logo"
-                  />
+        {!blocked ? (
+          <VaultList
+            entries={vault.entries}
+            initialLoading={vault.initialLoading && !vault.bootstrapped}
+            syncStatusLabel={vault.syncStatusLabel}
+            dropActive={dropActive}
+            busy={importing || busyId !== null}
+            caseSensitiveNames={caseSensitiveNames}
+            banner={
+              dropActive ? (
+                <span className="rounded-full border border-cyan-300 bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-800">
+                  Drop to import
                 </span>
-                <span className="pr-2 text-sm font-semibold text-slate-700 transition-colors group-hover:text-cyan-700">
-                  Open project repository
-                </span>
-              </a>
-            </div>
-
-            <div className="relative overflow-hidden rounded-[1.75rem] border border-slate-200 bg-gradient-to-br from-cyan-50 to-white p-6">
-              <div className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-cyan-200/60 blur-2xl" />
-              <div className="relative space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm uppercase tracking-[0.3em] text-slate-500">
-                    Counter demo
-                  </div>
-                  <img src={logoTailwind} className="h-6 w-6 opacity-90" alt="Tailwind CSS logo" />
-                </div>
-                <div className="text-5xl font-semibold text-slate-900">{count}</div>
-                <button
-                  onClick={() => setCount((value) => value + 1)}
-                  className="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-5 py-3 font-semibold text-white transition hover:bg-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-white"
-                >
-                  Increment counter
-                </button>
-                <p className="text-sm leading-6 text-slate-600">
-                  Edit <code>src/MainApp.tsx</code> and save to test HMR.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 text-slate-800 shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)]">
-            <div className="text-sm uppercase tracking-[0.3em] text-slate-500">Public assets</div>
-            <p className="mt-3 text-base leading-7">
-              Place static files into the <code>/public</code> folder.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-sky-50 p-6 text-slate-800 shadow-[0_18px_36px_-28px_rgba(14,116,144,0.4)]">
-            <div className="flex items-center gap-2 text-sm uppercase tracking-[0.3em] text-cyan-700">
-              <img src={logoTailwind} className="h-5 w-5" alt="Tailwind CSS logo" />
-              Tailwind system
-            </div>
-            <p className="mt-3 text-base leading-7 text-slate-700">
-              Unified utility classes now drive layout, hierarchy, and component consistency across
-              the app.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 text-slate-800 shadow-[0_18px_36px_-28px_rgba(15,23,42,0.35)]">
-            <div className="text-sm uppercase tracking-[0.3em] text-slate-500">Update panel</div>
-            <p className="mt-3 text-base leading-7">
-              Built-in updater UI follows the same spacing and typography rules for a more
-              harmonious experience.
-            </p>
-          </div>
-        </section>
-
-        <FirebasePanel />
-
-        <UpdateElectron />
+              ) : null
+            }
+            onDragEnter={onDragEnter}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            onOpen={(entry) => void openEntry(entry)}
+            onRename={renameEntry}
+            onDelete={setDeleteTarget}
+            onReveal={(entry) => void revealEntry(entry)}
+            onDragOut={(entry) => void dragOut(entry)}
+          />
+        ) : null}
       </div>
+
+      {deleteTarget ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+          role="presentation"
+          onClick={() => {
+            if (!deleting) {
+              setDeleteTarget(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vault-delete-title"
+            className="w-full max-w-md rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="vault-delete-title" className="text-lg font-semibold text-slate-900">
+              Delete {deleteTarget.localName}?
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              This removes the file from this device and deletes it across synced devices. Cloud
+              cleanup may remain pending if you are offline.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setDeleteTarget(null)}
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => void confirmDelete()}
+                className="rounded-2xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-rose-300"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

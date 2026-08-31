@@ -4,8 +4,71 @@
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         "$itemId": {
-          ".write": "auth != null && auth.uid === $uid",
-          ".validate": "newData.hasChildren(['createdAt', 'message']) && newData.child('createdAt').isNumber() && newData.child('message').isString() && newData.child('message').val().length > 0 && newData.child('message').val().length <= 10000 && (!data.exists() || newData.child('createdAt').val() === data.child('createdAt').val())"
+          ".write": "auth != null && auth.uid === $uid && $itemId.matches('^[A-Za-z0-9_-]+$')",
+          ".validate": "newData.hasChildren(['schemaVersion', 'name', 'createdAt', 'updatedAt', 'size', 'mimeType', 'sha256', 'revision', 'content']) && (newData.child('content').child('kind').val() !== 'inline' || newData.child('size').val() <= 40000) && (newData.child('content').child('kind').val() !== 'blob' || newData.child('size').val() <= 1073741824)",
+          "schemaVersion": {
+            ".validate": "newData.isNumber() && newData.val() === 1"
+          },
+          "name": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 255 && newData.val() !== '.' && newData.val() !== '..' && newData.val() !== '.buddy-tunnel.json' && newData.val() !== '.buddy-tunnel.json.bak' && !newData.val().matches('\\\\.buddy-tunnel\\\\..+\\\\.tmp') && newData.val().matches('[^<>:\"\\\\/|?*\\\\x00-\\\\x1F]+') && !newData.val().matches(' .*') && !newData.val().matches('.*[ .]') && !newData.val().matches('(?i)(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(\\\\..*)?')"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber() && newData.val() > 0 && (!data.exists() || newData.val() === data.val())"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber() && (newData.val() === now || (!data.exists() && data.parent().child('message').exists() && !data.parent().child('schemaVersion').exists() && newData.val() === data.parent().child('createdAt').val()))"
+          },
+          "size": {
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 === 0"
+          },
+          "mimeType": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 255"
+          },
+          "sha256": {
+            ".validate": "newData.isString() && newData.val().matches('[0-9a-f]{64}')"
+          },
+          "revision": {
+            ".validate": "newData.isString() && newData.val().matches('[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')"
+          },
+          "content": {
+            ".validate": "(newData.child('kind').val() === 'inline' && newData.hasChildren(['kind', 'text', 'encoding'])) || (newData.child('kind').val() === 'blob' && newData.hasChildren(['kind', 'storagePath']))",
+            "kind": {
+              ".validate": "newData.val() === 'inline' || newData.val() === 'blob'"
+            },
+            "text": {
+              ".validate": "newData.isString() && newData.val().length <= 10000 && newData.parent().child('kind').val() === 'inline'"
+            },
+            "encoding": {
+              ".validate": "newData.val() === 'utf-8' && newData.parent().child('kind').val() === 'inline'"
+            },
+            "storagePath": {
+              ".validate": "newData.parent().child('kind').val() === 'blob' && newData.isString() && newData.val().matches('^vault/' + $uid + '/' + $itemId + '/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "storageTombstones": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$itemId": {
+          ".write": "auth != null && auth.uid === $uid && $itemId.matches('^[A-Za-z0-9_-]+$')",
+          ".validate": "newData.hasChildren(['deletedAt', 'revision'])",
+          "deletedAt": {
+            ".validate": "newData.isNumber() && newData.val() === now"
+          },
+          "revision": {
+            ".validate": "newData.isString() && newData.val().matches('[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       }
     },

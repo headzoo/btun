@@ -11,7 +11,9 @@
     "format:check": "prettier --check .",
     "test": "pnpm -r --if-present test",
     "test:changed": "pnpm -r --if-present test:changed",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
+    "firebase:deploy:rules": "firebase deploy --only database,storage",
+    "firebase:deploy:hosting": "firebase deploy --only hosting"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -19,6 +21,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "firebase-tools": "^15.28.2",
     "globals": "^16.5.0",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",

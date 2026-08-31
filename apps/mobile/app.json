@@ -43,14 +43,34 @@
             "enabled": true,
             "activationRule": {
               "supportsText": true,
-              "supportsWebUrlWithMaxCount": 1,
-              "supportsWebPageWithMaxCount": 1
+              "supportsWebUrlWithMaxCount": 10,
+              "supportsWebPageWithMaxCount": 10,
+              "supportsImageWithMaxCount": 20,
+              "supportsMovieWithMaxCount": 10,
+              "supportsFileWithMaxCount": 20,
+              "supportsAttachmentsWithMaxCount": 20
             }
           },
           "android": {
             "enabled": true,
-            "singleShareMimeTypes": ["text/plain", "text/*"],
-            "multipleShareMimeTypes": ["text/plain", "text/*"]
+            "singleShareMimeTypes": [
+              "text/plain",
+              "text/*",
+              "image/*",
+              "video/*",
+              "audio/*",
+              "application/*",
+              "*/*"
+            ],
+            "multipleShareMimeTypes": [
+              "text/plain",
+              "text/*",
+              "image/*",
+              "video/*",
+              "audio/*",
+              "application/*",
+              "*/*"
+            ]
           }
         }
       ]

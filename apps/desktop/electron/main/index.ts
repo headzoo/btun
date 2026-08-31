@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { update } from './update';
+import { createVaultIpc } from './vault-ipc';
 import { loadWindowState, resolveWindowBounds, trackWindowState } from './window-state';
 
 const _require = createRequire(import.meta.url);
@@ -42,6 +43,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 let win: BrowserWindow | null = null;
+let disposeVaultIpc: (() => void) | null = null;
 const preload = path.join(__dirname, '../preload/index.mjs');
 const indexHtml = path.join(RENDERER_DIST, 'index.html');
 
@@ -58,12 +60,8 @@ async function createWindow() {
     show: false,
     webPreferences: {
       preload,
-      // Warning: Enable nodeIntegration and disable contextIsolation is not secure in production
-      // nodeIntegration: true,
-
-      // Consider using contextBridge.exposeInMainWorld
-      // Read more on https://www.electronjs.org/docs/latest/tutorial/context-isolation
-      // contextIsolation: false,
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   });
 
@@ -94,7 +92,27 @@ async function createWindow() {
   update(win);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  disposeVaultIpc = createVaultIpc({
+    getMainWindow: () => win,
+    userDataPath: app.getPath('userData'),
+    documentsPath: (() => {
+      try {
+        return app.getPath('documents');
+      } catch {
+        return '';
+      }
+    })(),
+    homePath: app.getPath('home'),
+  }).dispose;
+
+  return createWindow();
+});
+
+app.on('before-quit', () => {
+  disposeVaultIpc?.();
+  disposeVaultIpc = null;
+});
 
 app.on('window-all-closed', () => {
   win = null;
