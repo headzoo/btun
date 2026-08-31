@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
+import { isVerboseEnabled } from '../shared/cli-args';
+import { verboseLog } from '../shared/verbose-log';
 import { update } from './update';
 import { createVaultIpc } from './vault-ipc';
 import { loadWindowState, resolveWindowBounds, trackWindowState } from './window-state';
@@ -40,6 +42,10 @@ if (process.platform === 'win32') app.setAppUserModelId(app.getName());
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
+}
+
+if (isVerboseEnabled()) {
+  verboseLog('main', 'verbose logging enabled', { argv: process.argv });
 }
 
 let win: BrowserWindow | null = null;
@@ -88,11 +94,20 @@ async function createWindow() {
     return { action: 'deny' };
   });
 
+  if (isVerboseEnabled()) {
+    win.webContents.on('console-message', (_event, _level, message) => {
+      if (message.includes('[buddy-tunnel:')) {
+        console.log(message);
+      }
+    });
+  }
+
   // Auto update
   update(win);
 }
 
 app.whenReady().then(() => {
+  verboseLog('main', 'app ready');
   disposeVaultIpc = createVaultIpc({
     getMainWindow: () => win,
     userDataPath: app.getPath('userData'),

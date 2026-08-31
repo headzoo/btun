@@ -13,7 +13,9 @@
     "test:changed": "pnpm -r --if-present test:changed",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test",
     "firebase:deploy:rules": "firebase deploy --only database,storage",
-    "firebase:deploy:hosting": "firebase deploy --only hosting"
+    "firebase:deploy:hosting": "firebase deploy --only hosting",
+    "firebase:provision:database": "node scripts/provision-firebase-rtdb.cjs",
+    "firebase:provision:storage": "node scripts/provision-firebase-storage.cjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

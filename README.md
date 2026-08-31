@@ -110,6 +110,8 @@ Local duplicate preferred names are uniquified per device (`Report.pdf`, `Report
 Rules are versioned in [`database.rules.json`](database.rules.json) and [`storage.rules`](storage.rules). Publish with:
 
 ```bash
+pnpm firebase:provision:database   # once, if RTDB is not created yet
+pnpm firebase:provision:storage     # once, if Storage is not set up (requires Blaze plan)
 pnpm firebase:deploy:rules
 ```
 

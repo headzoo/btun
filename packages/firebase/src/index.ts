@@ -12,5 +12,6 @@ export {
 export type { FirebaseServices } from './init';
 export { useAuth } from './useAuth';
 export type { AuthState } from './useAuth';
+export { rtdbRestGet, waitForAuthUser, withTimeout } from './auth-ready';
 export { createFirebaseVaultTransport } from './vault-transport';
 export { storagePath } from './storage';

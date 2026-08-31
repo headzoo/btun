@@ -17,6 +17,9 @@ interface ImportMeta {
 interface Window {
   /** Narrow vault API; all filesystem access stays in Electron main. */
   buddyTunnel: import('../electron/main/vault-api').BuddyTunnelApi;
+  appFlags?: {
+    verbose: boolean;
+  };
   /**
    * Updater/demo IPC. Preload allowlists channels at runtime; type stays
    * Electron-compatible for existing updater UI.

@@ -2,7 +2,7 @@ import { getApp, getApps, initializeApp } from 'firebase/app';
 import type { FirebaseApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import type { Auth } from 'firebase/auth';
-import { getDatabase } from 'firebase/database';
+import { forceWebSockets, getDatabase } from 'firebase/database';
 import type { Database } from 'firebase/database';
 import { getStorage } from 'firebase/storage';
 import type { FirebaseStorage } from 'firebase/storage';
@@ -18,10 +18,24 @@ export interface FirebaseServices {
 
 let services: FirebaseServices | null = null;
 
+function isElectronRenderer(): boolean {
+  return typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent);
+}
+
+function configureRealtimeDatabaseTransport(): void {
+  if (!isElectronRenderer()) {
+    return;
+  }
+  // Long-polling often hangs indefinitely in Electron; WebSockets are reliable.
+  forceWebSockets();
+}
+
 export function initFirebase(config: FirebaseConfig): FirebaseServices {
   if (services) {
     return services;
   }
+
+  configureRealtimeDatabaseTransport();
 
   const app = getApps().length > 0 ? getApp() : initializeApp(config);
   const auth = getAuth(app);

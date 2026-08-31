@@ -7,6 +7,10 @@ import { electronSimple } from 'vite-plugin-electron/multi-env';
 import { notBundle } from 'vite-plugin-electron/plugin';
 import pkg from './package.json';
 
+if (process.argv.includes('-v') || process.argv.includes('--verbose')) {
+  process.env.BUDDY_TUNNEL_VERBOSE = '1';
+}
+
 // Workspace packages ship TypeScript source; bundle them into Electron main/preload
 // instead of leaving them external (Node ESM cannot resolve extensionless TS imports).
 const external = Object.keys(

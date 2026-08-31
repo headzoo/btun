@@ -53,7 +53,11 @@ export interface VaultSyncOptions {
   caseSensitiveNames?: boolean;
   maxParallel?: number;
   now?: () => number;
+  /** When set, coordinator emits structured startup/sync diagnostics. */
+  debugLog?: VaultDebugLog;
 }
+
+export type VaultDebugLog = (scope: string, message: string, detail?: unknown) => void;
 
 export interface VaultRefreshOptions {
   /** Rescan local files only — does not wait for cloud sync pumps. */
@@ -213,6 +217,8 @@ export class VaultSyncCoordinator {
   private idleWaiters: Array<() => void> = [];
   private localEventsInFlight = 0;
   private connectivityWork = 0;
+  private readonly debugLog?: VaultDebugLog;
+  private lastDebugStatusLabel: string | null = null;
 
   constructor(options: VaultSyncOptions) {
     this.adapter = options.adapter;
@@ -221,7 +227,12 @@ export class VaultSyncCoordinator {
     this.uniquifyOptions = { caseSensitive: options.caseSensitiveNames === true };
     this.maxParallel = Math.max(1, options.maxParallel ?? DEFAULT_MAX_PARALLEL);
     this.now = options.now ?? (() => Date.now());
+    this.debugLog = options.debugLog;
     this.index = createEmptyVaultIndex(options.transport.uid);
+  }
+
+  private log(scope: string, message: string, detail?: unknown): void {
+    this.debugLog?.(scope, message, detail);
   }
 
   get commands(): VaultSyncCommands {
@@ -248,6 +259,11 @@ export class VaultSyncCoordinator {
   async start(options?: VaultStartOptions): Promise<void> {
     this.generation += 1;
     const gen = this.generation;
+    this.log('coordinator', 'start', {
+      gen,
+      awaitRemote: options?.awaitRemote ?? true,
+      uid: this.transport.uid,
+    });
     this.clearRuntime();
     this.started = true;
     this.bootstrapping = true;
@@ -256,19 +272,29 @@ export class VaultSyncCoordinator {
     this.emitSnapshot();
 
     try {
+      this.log('coordinator', 'bootstrapLocal begin', { gen });
       const local = await this.bootstrapLocal(gen);
       if (!this.isGen(gen)) {
         return;
       }
       if (local === 'blocked') {
+        this.log('coordinator', 'bootstrapLocal blocked', { gen, rootStatus: this.rootStatus });
         this.bootstrapping = false;
         this.emitSnapshot();
         return;
       }
+      this.log('coordinator', 'bootstrapLocal ok', {
+        gen,
+        indexEntries: Object.keys(this.index.entries).length,
+      });
     } catch (error) {
       if (!this.isGen(gen)) {
         return;
       }
+      this.log('coordinator', 'bootstrapLocal failed', {
+        gen,
+        error: errorMessage(error, 'unknown'),
+      });
       this.rootStatus = {
         kind: 'error',
         message: errorMessage(error, 'Vault sync failed to start.'),
@@ -287,7 +313,13 @@ export class VaultSyncCoordinator {
 
     const remote = this.bootstrapRemote(gen);
     if (options?.awaitRemote === false) {
-      void remote.catch(() => undefined);
+      this.log('coordinator', 'local ready; remote bootstrap continues in background', { gen });
+      void remote.catch((error) => {
+        this.log('coordinator', 'remote bootstrap failed', {
+          gen,
+          error: errorMessage(error, 'unknown'),
+        });
+      });
       this.notifyIdle();
       return;
     }
@@ -664,6 +696,7 @@ export class VaultSyncCoordinator {
   }
 
   private async bootstrapRemote(gen: number): Promise<void> {
+    this.log('remote', 'bootstrap begin', { gen });
     this.remoteSyncing = true;
     this.emitSnapshot();
     try {
@@ -671,6 +704,11 @@ export class VaultSyncCoordinator {
     } finally {
       if (this.isGen(gen)) {
         this.remoteSyncing = false;
+        this.log('remote', 'initial catalog fetch finished', {
+          gen,
+          remoteCatalogReady: this.remoteCatalogReady,
+          catalogError: this.catalogError,
+        });
         this.emitSnapshot();
       }
     }
@@ -680,9 +718,11 @@ export class VaultSyncCoordinator {
 
     try {
       this.subscribeRemote(gen);
+      this.log('remote', 'waiting for initial remote work', { gen });
       await this.waitForWork(gen, { ignoreConnectivity: true, timeoutMs: 30_000 });
 
       if (this.remoteCatalogReady) {
+        this.log('remote', 'ingesting remote catalog', { gen });
         const ingested = await this.ingestRemoteCatalog(gen);
         if (!this.isGen(gen)) {
           return;
@@ -690,6 +730,11 @@ export class VaultSyncCoordinator {
         if (ingested) {
           await this.commitIndex((index) => index);
           this.outwardEnabled = true;
+          this.log('remote', 'remote catalog ingested', { gen });
+        } else if (this.remoteCatalogReady && this.live.size === 0 && this.tombstones.size === 0) {
+          this.outwardEnabled = true;
+          this.allowAdopt = true;
+          this.log('remote', 'empty remote catalog; outward sync enabled', { gen });
         }
       }
 
@@ -710,6 +755,13 @@ export class VaultSyncCoordinator {
     } finally {
       if (this.isGen(gen)) {
         this.remoteBootstrapComplete = true;
+        this.log('remote', 'bootstrap complete', {
+          gen,
+          connected: this.connected,
+          remoteCatalogReady: this.remoteCatalogReady,
+          outwardEnabled: this.outwardEnabled,
+          catalogError: this.catalogError,
+        });
         this.emitSnapshot();
       }
     }
@@ -737,6 +789,8 @@ export class VaultSyncCoordinator {
         this.outwardEnabled = true;
         this.flushBufferedLocal();
         await this.refreshLocals();
+      } else if (this.remoteCatalogReady && this.live.size === 0 && this.tombstones.size === 0) {
+        this.outwardEnabled = true;
       }
     }
     if (!this.isGen(gen)) {
@@ -775,6 +829,8 @@ export class VaultSyncCoordinator {
 
   private async refreshRemoteCatalogOnce(gen: number): Promise<boolean> {
     const epoch = this.catalogEpoch;
+    const startedAt = this.now();
+    this.log('catalog', 'fetch begin', { gen, epoch });
     try {
       const [children, tombs] = await Promise.all([
         this.transport.listLiveChildren(),
@@ -806,12 +862,25 @@ export class VaultSyncCoordinator {
       this.remoteCatalogReady = true;
       this.catalogError = null;
       this.connected = true;
+      this.log('catalog', 'fetch ok', {
+        gen,
+        epoch,
+        elapsedMs: this.now() - startedAt,
+        liveCount: children.length,
+        tombstoneCount: tombs.length,
+      });
       return true;
     } catch (error) {
       if (this.isGen(gen) && epoch === this.catalogEpoch) {
         // Keep any positive knowledge already in maps, but absences stay untrusted.
         this.remoteCatalogReady = false;
         this.catalogError = errorMessage(error, 'Could not load cloud catalog.');
+        this.log('catalog', 'fetch failed', {
+          gen,
+          epoch,
+          elapsedMs: this.now() - startedAt,
+          error: this.catalogError,
+        });
       }
       return false;
     }
@@ -1110,6 +1179,7 @@ export class VaultSyncCoordinator {
         return next;
       });
       if (adoptedId) {
+        this.log('adopt', 'mapped local file', { localName, id: adoptedId });
         this.markLanded(adoptedId);
         this.enqueue(adoptedId);
       }
@@ -1178,8 +1248,20 @@ export class VaultSyncCoordinator {
         }
         decision = decideReconcile(this.buildInput(id));
       }
+      this.log('pump', 'decision', {
+        id,
+        type: decision.type,
+        connected: this.connected,
+        remoteCatalogReady: this.remoteCatalogReady,
+        outwardEnabled: this.outwardEnabled,
+        pending: latestPendingForId(this.index.pendingOperations, id)?.kind ?? null,
+      });
       await this.execute(id, decision, gen);
-      if (this.isGen(gen) && decision.type !== 'ignore-invalid') {
+      if (!this.isGen(gen) || decision.type === 'ignore-invalid') {
+        return;
+      }
+      const pending = latestPendingForId(this.index.pendingOperations, id);
+      if (pending?.state !== 'failed') {
         this.errors.delete(id);
       }
     } catch (error) {
@@ -1427,9 +1509,19 @@ export class VaultSyncCoordinator {
 
   private async publishPending(id: string, gen: number): Promise<void> {
     const pending = latestPendingForId(this.index.pendingOperations, id);
-    if (!pending || !this.connected) {
+    if (!pending) {
+      this.log('publish', 'skip — no pending op', { id });
       return;
     }
+    if (!this.connected) {
+      this.log('publish', 'skip — not connected', { id, kind: pending.kind });
+      return;
+    }
+    this.log('publish', 'start', {
+      id,
+      kind: pending.kind,
+      localName: 'localName' in pending ? pending.localName : undefined,
+    });
     await this.setPendingState(pending.opId, 'in-flight');
     if (!this.isGen(gen)) {
       return;
@@ -1450,6 +1542,7 @@ export class VaultSyncCoordinator {
         return;
       }
       const message = errorMessage(error, 'Cloud publish failed.');
+      this.log('publish', 'failed', { id, error: message });
       this.errors.set(id, message);
       await this.setPendingState(pending.opId, 'failed', message);
     }
@@ -1488,6 +1581,12 @@ export class VaultSyncCoordinator {
     if (!this.isGen(gen)) {
       return;
     }
+    this.log('publish', 'commitBytes result', {
+      id,
+      outcome: outcome.outcome,
+      reason: 'reason' in outcome ? outcome.reason : undefined,
+      size: bytes.byteLength,
+    });
     await this.handlePublishOutcome(id, pending.opId, outcome, gen);
   }
 
@@ -1578,6 +1677,7 @@ export class VaultSyncCoordinator {
       return;
     }
     await this.setPendingState(opId, 'failed', `Publish lost (${outcome.reason}).`);
+    this.errors.set(id, `Publish lost (${outcome.reason}).`);
     this.enqueue(id);
     this.schedulePump(gen);
   }
@@ -1913,6 +2013,19 @@ export class VaultSyncCoordinator {
 
   private emitSnapshot(): void {
     this.latestSnapshot = this.buildSnapshot();
+    const label = this.latestSnapshot.syncStatusLabel;
+    if (this.debugLog && label !== this.lastDebugStatusLabel) {
+      this.lastDebugStatusLabel = label;
+      this.log('status', label, {
+        connected: this.latestSnapshot.connected,
+        bootstrapped: this.latestSnapshot.bootstrapped,
+        remoteSyncing: this.remoteSyncing,
+        remoteBootstrapComplete: this.remoteBootstrapComplete,
+        remoteCatalogReady: this.remoteCatalogReady,
+        catalogError: this.catalogError,
+        rootStatus: this.latestSnapshot.rootStatus.kind,
+      });
+    }
     for (const listener of this.listeners) {
       listener(this.latestSnapshot);
     }

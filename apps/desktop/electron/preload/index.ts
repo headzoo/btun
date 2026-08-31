@@ -7,6 +7,7 @@ import type {
 } from '../main/vault-api';
 import { BUDDY_TUNNEL_CHANNELS } from '../main/vault-api';
 import type { ExpectedLocalEffect, LocalVaultEvent, VaultIndex, VaultResult } from '@yard-1/vault';
+import { isVerboseEnabled } from '../shared/cli-args';
 
 const UPDATER_INVOKE_CHANNELS = new Set([
   'check-update',
@@ -118,6 +119,10 @@ const buddyTunnel: BuddyTunnelApi = {
 };
 
 contextBridge.exposeInMainWorld('buddyTunnel', buddyTunnel);
+
+contextBridge.exposeInMainWorld('appFlags', {
+  verbose: isVerboseEnabled(),
+});
 
 // Keep updater/demo IPC available, but only on an allowlisted channel set.
 contextBridge.exposeInMainWorld('ipcRenderer', {

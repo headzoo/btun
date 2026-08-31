@@ -7,6 +7,7 @@ import { VaultList } from '@/components/vault/VaultList';
 import { VaultSettings } from '@/components/vault/VaultSettings';
 import { VaultToolbar } from '@/components/vault/VaultToolbar';
 import { useVault } from '@/hooks/useVault';
+import { verboseLog } from '@/lib/verbose';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -42,11 +43,14 @@ export function MainApp() {
     setActionError(null);
     setActionNotice(null);
     try {
+      verboseLog('import', 'importDroppedFiles begin', { count: files.length });
       const result = await window.buddyTunnel.importDroppedFiles(files);
       if (!result.ok) {
+        verboseLog('import', 'importDroppedFiles failed', result.error);
         setActionError(result.error.message);
         return;
       }
+      verboseLog('import', 'importDroppedFiles ok', { imported: result.value.length });
       await vault.commands.refresh({ localOnly: true });
       const count = result.value.length;
       setActionNotice(

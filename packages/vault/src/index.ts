@@ -157,4 +157,10 @@ export {
 export type { ReconcileDecision, ReconcileInput } from './reconcile';
 
 export { VaultSyncCoordinator, emptyVaultSyncSnapshot } from './coordinator';
-export type { VaultRefreshOptions, VaultStartOptions, VaultSyncCommands, VaultSyncOptions } from './coordinator';
+export type {
+  VaultRefreshOptions,
+  VaultStartOptions,
+  VaultSyncCommands,
+  VaultDebugLog,
+  VaultSyncOptions,
+} from './coordinator';

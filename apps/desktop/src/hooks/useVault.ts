@@ -11,6 +11,7 @@ import {
   startDesktopVaultSync,
   stopDesktopVaultSync,
 } from '@/lib/vaultSync';
+import { verboseLog } from '@/lib/verbose';
 
 export interface UseVaultResult extends VaultSyncSnapshot {
   commands: VaultSyncCommands & {
@@ -33,6 +34,7 @@ export function useVault(): UseVaultResult {
 
   useEffect(() => {
     if (!user) {
+      verboseLog('vault', 'no auth user; stopping vault sync');
       unsubRef.current();
       unsubRef.current = () => undefined;
       void stopDesktopVaultSync();
@@ -41,6 +43,7 @@ export function useVault(): UseVaultResult {
     }
 
     let cancelled = false;
+    verboseLog('vault', 'auth user present; starting vault sync', { uid: user.uid });
 
     const syncHooks = {
       onSnapshot: (next: VaultSyncSnapshot) => {
@@ -54,15 +57,12 @@ export function useVault(): UseVaultResult {
       },
     };
 
-    void startDesktopVaultSync(user.uid, syncHooks)
-      .then(() => {
-        if (cancelled) {
-          unsubRef.current();
-          unsubRef.current = () => undefined;
-        }
-      })
-      .catch((error) => {
+    void (async () => {
+      try {
+        await startDesktopVaultSync(user.uid, syncHooks);
+      } catch (error) {
         if (!cancelled) {
+          verboseLog('vault', 'startDesktopVaultSync failed', error);
           const code =
             error && typeof error === 'object' && 'code' in error
               ? String((error as { code?: unknown }).code)
@@ -86,7 +86,8 @@ export function useVault(): UseVaultResult {
             },
           });
         }
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -102,7 +103,9 @@ export function useVault(): UseVaultResult {
     }
     return {
       refresh: (options) =>
-        startDesktopVaultSync(user.uid).then((coordinator) => coordinator.commands.refresh(options)),
+        startDesktopVaultSync(user.uid).then((coordinator) =>
+          coordinator.commands.refresh(options),
+        ),
       rename: (id, preferredName) =>
         startDesktopVaultSync(user.uid).then((coordinator) =>
           coordinator.commands.rename(id, preferredName),

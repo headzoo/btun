@@ -18,6 +18,7 @@ import {
   type RenameInput,
   type VaultStatus,
 } from './vault-api';
+import { verboseLog } from '../shared/verbose-log';
 
 function isAllowedSender(
   event: IpcMainInvokeEvent,
@@ -76,11 +77,11 @@ function createHost(
       const win = getMainWindow();
       const result = win
         ? await dialog.showOpenDialog(win, {
-            properties: ['openDirectory', 'createDirectory'],
-          })
+          properties: ['openDirectory', 'createDirectory'],
+        })
         : await dialog.showOpenDialog({
-            properties: ['openDirectory', 'createDirectory'],
-          });
+          properties: ['openDirectory', 'createDirectory'],
+        });
       if (result.canceled || result.filePaths.length === 0) {
         return null;
       }
@@ -136,183 +137,190 @@ export function createVaultIpc(options: {
   const handlers: Array<
     [string, (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>]
   > = [
-    [
-      BUDDY_TUNNEL_CHANNELS.start,
-      async (event, uid) =>
-        guard(event, async () => {
-          const value = asString(uid);
-          if (!value) {
-            return fail('unsafe-name', 'uid must be a string.');
-          }
-          return service.start(value);
-        }),
-    ],
-    [BUDDY_TUNNEL_CHANNELS.stop, async (event) => guard(event, () => service.stop())],
-    [
-      BUDDY_TUNNEL_CHANNELS.getStatus,
-      async (event) => guard(event, async () => ok(service.getStatus())),
-    ],
-    [BUDDY_TUNNEL_CHANNELS.list, async (event) => guard(event, () => service.listEntries())],
-    [
-      BUDDY_TUNNEL_CHANNELS.listChildren,
-      async (event) =>
-        guard(event, async () => {
-          const children = await service.listDirectChildren();
-          return ok(children);
-        }),
-    ],
-    [BUDDY_TUNNEL_CHANNELS.loadIndex, async (event) => guard(event, () => service.loadIndex())],
-    [
-      BUDDY_TUNNEL_CHANNELS.saveIndex,
-      async (event, index) =>
-        guard(event, async () => {
-          if (!index || typeof index !== 'object') {
-            return fail('unsafe-name', 'saveIndex requires a vault index object.');
-          }
-          return service.saveIndex(index as VaultIndex);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.configureRoot,
-      async (event) => guard(event, () => service.configureRoot()),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.useDefaultRoot,
-      async (event) => guard(event, () => service.useDefaultRoot()),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.importDroppedFiles,
-      async (event, paths) =>
-        guard(event, async () => {
-          const value = asStringArray(paths);
-          if (!value) {
-            return fail('unsafe-name', 'paths must be a string array.');
-          }
-          return service.importPaths(value);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.importClipboard,
-      async (event) =>
-        guard(event, async (): Promise<VaultResult<ImportedFileResult[]>> => {
-          const paths = readClipboardFilePaths();
-          if (!paths.ok) {
-            return forwardFail(paths);
-          }
-          return service.importPaths(paths.value);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.readBytes,
-      async (event, localName) =>
-        guard(event, async () => {
-          const value = asString(localName);
-          if (!value) {
-            return fail('unsafe-name', 'localName must be a string.');
-          }
-          return service.readBytesResult(value);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.materialize,
-      async (event, input) =>
-        guard(event, async () => {
-          if (!input || typeof input !== 'object') {
-            return fail('unsafe-name', 'materialize input is invalid.');
-          }
-          const payload = input as MaterializeInput;
-          const localName = asString(payload.localName);
-          const bytes = asBytes(payload.bytes);
-          if (!localName || !bytes) {
-            return fail('unsafe-name', 'materialize requires localName and bytes.');
-          }
-          return service.materialize(localName, bytes);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.writeAtomic,
-      async (event, localName, bytesValue) =>
-        guard(event, async () => {
-          const name = asString(localName);
-          const bytes = asBytes(bytesValue);
-          if (!name || !bytes) {
-            return fail('unsafe-name', 'writeAtomic requires localName and bytes.');
-          }
-          return service.writeAtomicResult(name, bytes);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.rename,
-      async (event, input) =>
-        guard(event, async () => {
-          if (!input || typeof input !== 'object') {
-            return fail('unsafe-name', 'rename input is invalid.');
-          }
-          const payload = input as RenameInput;
-          const from = asString(payload.from);
-          const to = asString(payload.to);
-          if (!from || !to) {
-            return fail('unsafe-name', 'rename requires from and to.');
-          }
-          return service.renameResult(from, to);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.remove,
-      async (event, localName) =>
-        guard(event, async () => {
-          const value = asString(localName);
-          if (!value) {
-            return fail('unsafe-name', 'localName must be a string.');
-          }
-          return service.removeResult(value);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.open,
-      async (event, localName) =>
-        guard(event, async () => {
-          const value = asString(localName);
-          if (!value) {
-            return fail('unsafe-name', 'localName must be a string.');
-          }
-          return service.openLocal(value);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.reveal,
-      async (event, localName) =>
-        guard(event, async () => {
-          const value = asString(localName);
-          if (!value) {
-            return fail('unsafe-name', 'localName must be a string.');
-          }
-          return service.revealLocal(value);
-        }),
-    ],
-    [BUDDY_TUNNEL_CHANNELS.revealRoot, async (event) => guard(event, () => service.revealRoot())],
-    [
-      BUDDY_TUNNEL_CHANNELS.startDrag,
-      async (event, localName) =>
-        guard(event, async () => {
-          const value = asString(localName);
-          if (!value) {
-            return fail('unsafe-name', 'localName must be a string.');
-          }
-          return service.startDrag(value);
-        }),
-    ],
-    [
-      BUDDY_TUNNEL_CHANNELS.registerExpectedEffect,
-      async (event, effect) =>
-        guard(event, async () => {
-          if (!effect || typeof effect !== 'object') {
-            return fail('unsafe-name', 'expected effect is invalid.');
-          }
-          return service.registerExpectedEffectResult(effect as ExpectedLocalEffect);
-        }),
-    ],
-  ];
+      [
+        BUDDY_TUNNEL_CHANNELS.start,
+        async (event, uid) =>
+          guard(event, async () => {
+            const value = asString(uid);
+            if (!value) {
+              return fail('unsafe-name', 'uid must be a string.');
+            }
+            verboseLog('vault-main', 'start requested', { uid: value });
+            const result = await service.start(value);
+            verboseLog('vault-main', 'start finished', {
+              uid: value,
+              ok: result.ok,
+              status: result.ok ? result.value : result.error,
+            });
+            return result;
+          }),
+      ],
+      [BUDDY_TUNNEL_CHANNELS.stop, async (event) => guard(event, () => service.stop())],
+      [
+        BUDDY_TUNNEL_CHANNELS.getStatus,
+        async (event) => guard(event, async () => ok(service.getStatus())),
+      ],
+      [BUDDY_TUNNEL_CHANNELS.list, async (event) => guard(event, () => service.listEntries())],
+      [
+        BUDDY_TUNNEL_CHANNELS.listChildren,
+        async (event) =>
+          guard(event, async () => {
+            const children = await service.listDirectChildren();
+            return ok(children);
+          }),
+      ],
+      [BUDDY_TUNNEL_CHANNELS.loadIndex, async (event) => guard(event, () => service.loadIndex())],
+      [
+        BUDDY_TUNNEL_CHANNELS.saveIndex,
+        async (event, index) =>
+          guard(event, async () => {
+            if (!index || typeof index !== 'object') {
+              return fail('unsafe-name', 'saveIndex requires a vault index object.');
+            }
+            return service.saveIndex(index as VaultIndex);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.configureRoot,
+        async (event) => guard(event, () => service.configureRoot()),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.useDefaultRoot,
+        async (event) => guard(event, () => service.useDefaultRoot()),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.importDroppedFiles,
+        async (event, paths) =>
+          guard(event, async () => {
+            const value = asStringArray(paths);
+            if (!value) {
+              return fail('unsafe-name', 'paths must be a string array.');
+            }
+            return service.importPaths(value);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.importClipboard,
+        async (event) =>
+          guard(event, async (): Promise<VaultResult<ImportedFileResult[]>> => {
+            const paths = readClipboardFilePaths();
+            if (!paths.ok) {
+              return forwardFail(paths);
+            }
+            return service.importPaths(paths.value);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.readBytes,
+        async (event, localName) =>
+          guard(event, async () => {
+            const value = asString(localName);
+            if (!value) {
+              return fail('unsafe-name', 'localName must be a string.');
+            }
+            return service.readBytesResult(value);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.materialize,
+        async (event, input) =>
+          guard(event, async () => {
+            if (!input || typeof input !== 'object') {
+              return fail('unsafe-name', 'materialize input is invalid.');
+            }
+            const payload = input as MaterializeInput;
+            const localName = asString(payload.localName);
+            const bytes = asBytes(payload.bytes);
+            if (!localName || !bytes) {
+              return fail('unsafe-name', 'materialize requires localName and bytes.');
+            }
+            return service.materialize(localName, bytes);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.writeAtomic,
+        async (event, localName, bytesValue) =>
+          guard(event, async () => {
+            const name = asString(localName);
+            const bytes = asBytes(bytesValue);
+            if (!name || !bytes) {
+              return fail('unsafe-name', 'writeAtomic requires localName and bytes.');
+            }
+            return service.writeAtomicResult(name, bytes);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.rename,
+        async (event, input) =>
+          guard(event, async () => {
+            if (!input || typeof input !== 'object') {
+              return fail('unsafe-name', 'rename input is invalid.');
+            }
+            const payload = input as RenameInput;
+            const from = asString(payload.from);
+            const to = asString(payload.to);
+            if (!from || !to) {
+              return fail('unsafe-name', 'rename requires from and to.');
+            }
+            return service.renameResult(from, to);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.remove,
+        async (event, localName) =>
+          guard(event, async () => {
+            const value = asString(localName);
+            if (!value) {
+              return fail('unsafe-name', 'localName must be a string.');
+            }
+            return service.removeResult(value);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.open,
+        async (event, localName) =>
+          guard(event, async () => {
+            const value = asString(localName);
+            if (!value) {
+              return fail('unsafe-name', 'localName must be a string.');
+            }
+            return service.openLocal(value);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.reveal,
+        async (event, localName) =>
+          guard(event, async () => {
+            const value = asString(localName);
+            if (!value) {
+              return fail('unsafe-name', 'localName must be a string.');
+            }
+            return service.revealLocal(value);
+          }),
+      ],
+      [BUDDY_TUNNEL_CHANNELS.revealRoot, async (event) => guard(event, () => service.revealRoot())],
+      [
+        BUDDY_TUNNEL_CHANNELS.startDrag,
+        async (event, localName) =>
+          guard(event, async () => {
+            const value = asString(localName);
+            if (!value) {
+              return fail('unsafe-name', 'localName must be a string.');
+            }
+            return service.startDrag(value);
+          }),
+      ],
+      [
+        BUDDY_TUNNEL_CHANNELS.registerExpectedEffect,
+        async (event, effect) =>
+          guard(event, async () => {
+            if (!effect || typeof effect !== 'object') {
+              return fail('unsafe-name', 'expected effect is invalid.');
+            }
+            return service.registerExpectedEffectResult(effect as ExpectedLocalEffect);
+          }),
+      ],
+    ];
 
   for (const [channel, handler] of handlers) {
     if (!BUDDY_TUNNEL_INVOKE_CHANNELS.includes(channel)) {

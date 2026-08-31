@@ -56,6 +56,8 @@ import type {
 } from '@yard-1/vault';
 
 import { getFirebase, requireFirebaseStorage } from './init';
+import { rtdbRestGet, rtdbRestPut, waitForAuthUser, withTimeout } from './auth-ready';
+import { generateFirebasePushId } from './rtdb-push-id';
 
 function snapshotKey(snap: DataSnapshot): string | null {
   return snap.key;
@@ -74,12 +76,19 @@ function lost(
   return { outcome: 'lost', current, reason };
 }
 
+function isElectronRenderer(): boolean {
+  return typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent);
+}
+
 class FirebaseVaultTransport implements VaultTransport {
   constructor(readonly uid: string) {
     rtdbLiveRoot(uid);
   }
 
   allocateId(): string {
+    if (isElectronRenderer()) {
+      return generateFirebasePushId();
+    }
     const { db } = getFirebase();
     const idRef = push(ref(db, rtdbLiveRoot(this.uid)));
     if (!idRef.key) {
@@ -89,22 +98,32 @@ class FirebaseVaultTransport implements VaultTransport {
   }
 
   async listLiveChildren(): Promise<LiveChildParse[]> {
-    const { db } = getFirebase();
-    const snap = await get(ref(db, rtdbLiveRoot(this.uid)));
-    if (!snap.exists() || typeof snap.val() !== 'object' || snap.val() === null) {
+    const user = await waitForAuthUser(this.uid);
+    const path = rtdbLiveRoot(this.uid);
+    const raw = isElectronRenderer()
+      ? await rtdbRestGet(path, await user.getIdToken())
+      : await withTimeout(get(ref(getFirebase().db, path)), `RTDB read ${path}`).then((snap) =>
+        snap.exists() ? snap.val() : null,
+      );
+    if (raw === null || typeof raw !== 'object') {
       return [];
     }
-    const children = snap.val() as Record<string, unknown>;
+    const children = raw as Record<string, unknown>;
     return Object.entries(children).map(([id, value]) => parseLiveChild(id, value, this.uid));
   }
 
   async listTombstones(): Promise<Array<{ id: string; tombstone: RemoteTombstone }>> {
-    const { db } = getFirebase();
-    const snap = await get(ref(db, rtdbTombstoneRoot(this.uid)));
-    if (!snap.exists() || typeof snap.val() !== 'object' || snap.val() === null) {
+    const user = await waitForAuthUser(this.uid);
+    const path = rtdbTombstoneRoot(this.uid);
+    const raw = isElectronRenderer()
+      ? await rtdbRestGet(path, await user.getIdToken())
+      : await withTimeout(get(ref(getFirebase().db, path)), `RTDB read ${path}`).then((snap) =>
+        snap.exists() ? snap.val() : null,
+      );
+    if (raw === null || typeof raw !== 'object') {
       return [];
     }
-    const children = snap.val() as Record<string, unknown>;
+    const children = raw as Record<string, unknown>;
     const out: Array<{ id: string; tombstone: RemoteTombstone }> = [];
     for (const [id, value] of Object.entries(children)) {
       const parsed = parseRemoteTombstone(value);
@@ -116,6 +135,14 @@ class FirebaseVaultTransport implements VaultTransport {
   }
 
   async getLiveChild(id: string): Promise<LiveChildParse | null> {
+    if (isElectronRenderer()) {
+      const user = await waitForAuthUser(this.uid);
+      const raw = await rtdbRestGet(rtdbLivePath(this.uid, id), await user.getIdToken());
+      if (raw === null) {
+        return null;
+      }
+      return parseLiveChild(id, raw, this.uid);
+    }
     const { db } = getFirebase();
     const snap = await get(ref(db, rtdbLivePath(this.uid, id)));
     if (!snap.exists()) {
@@ -125,6 +152,15 @@ class FirebaseVaultTransport implements VaultTransport {
   }
 
   async getTombstone(id: string): Promise<RemoteTombstone | null> {
+    if (isElectronRenderer()) {
+      const user = await waitForAuthUser(this.uid);
+      const raw = await rtdbRestGet(rtdbTombstonePath(this.uid, id), await user.getIdToken());
+      if (raw === null) {
+        return null;
+      }
+      const parsed = parseRemoteTombstone(raw);
+      return parsed.ok ? parsed.value : null;
+    }
     const { db } = getFirebase();
     const snap = await get(ref(db, rtdbTombstonePath(this.uid, id)));
     if (!snap.exists()) {
@@ -132,6 +168,72 @@ class FirebaseVaultTransport implements VaultTransport {
     }
     const parsed = parseRemoteTombstone(snap.val());
     return parsed.ok ? parsed.value : null;
+  }
+
+  private async publishRecordElectron(
+    input: PublishRecordInput,
+    body: { size: number; sha256: string; content: RemoteFileRecord['content'] },
+    ctx: { uid: string; id: string },
+  ): Promise<MutationOutcome<RemoteFileRecord>> {
+    const user = await waitForAuthUser(this.uid);
+    const token = await user.getIdToken();
+    const path = rtdbLivePath(this.uid, input.id);
+    const current = await rtdbRestGet(path, token);
+
+    if (input.expectedClock === null) {
+      if (current !== null && current !== undefined) {
+        const conflict = await this.readConflictCurrent(input.id);
+        const reason =
+          conflict && 'deletedAt' in conflict ? 'tombstone' : conflict ? 'conflict' : 'absent';
+        return lost(conflict, reason);
+      }
+    } else {
+      if (current === null || current === undefined || isLegacyStorageItem(current)) {
+        return lost(await this.readConflictCurrent(input.id), 'absent');
+      }
+      const parsedCurrent = parseRemoteFileRecord(current, ctx);
+      if (
+        !parsedCurrent.ok ||
+        !clocksEqual(clockFromRecord(parsedCurrent.value), input.expectedClock)
+      ) {
+        return lost(
+          parsedCurrent.ok ? parsedCurrent.value : await this.readConflictCurrent(input.id),
+          'conflict',
+        );
+      }
+    }
+
+    const currentCreatedAt =
+      typeof current === 'object' &&
+        current !== null &&
+        'createdAt' in current &&
+        typeof (current as { createdAt: unknown }).createdAt === 'number'
+        ? (current as { createdAt: number }).createdAt
+        : undefined;
+    const nowMs = Date.now();
+
+    await rtdbRestPut(path, token, {
+      schemaVersion: REMOTE_SCHEMA_VERSION,
+      name: input.name,
+      createdAt: currentCreatedAt ?? input.createdAt ?? nowMs,
+      updatedAt: nowMs,
+      size: body.size,
+      mimeType: input.mimeType,
+      sha256: body.sha256,
+      revision: input.revision,
+      content: body.content,
+    });
+
+    const written = await rtdbRestGet(path, token);
+    const parsed = await this.parseCommitted(input.id, written);
+    if (parsed.outcome === 'won') {
+      await this.clearTombstoneElectron(input.id, token);
+    }
+    return parsed;
+  }
+
+  private async clearTombstoneElectron(id: string, token: string): Promise<void> {
+    await rtdbRestPut(rtdbTombstonePath(this.uid, id), token, null);
   }
 
   subscribeLiveChildren(listener: (event: LiveChildEvent) => void): Unsubscribe {
@@ -188,6 +290,11 @@ class FirebaseVaultTransport implements VaultTransport {
   }
 
   subscribeConnectivity(listener: (connected: boolean) => void): Unsubscribe {
+    if (isElectronRenderer()) {
+      // .info/connected is unreliable in Electron and spurious disconnects block uploads.
+      queueMicrotask(() => listener(true));
+      return () => undefined;
+    }
     const { db } = getFirebase();
     const connectedRef = ref(db, '.info/connected');
     return onValue(connectedRef, (snap) => {
@@ -204,7 +311,10 @@ class FirebaseVaultTransport implements VaultTransport {
     const storage = requireFirebaseStorage();
     const storagePath = blobObjectPath(this.uid, id, revision);
     const objectRef = storageRef(storage, storagePath);
-    await uploadBytes(objectRef, bytes, { contentType: mimeType });
+    await withTimeout(
+      uploadBytes(objectRef, bytes, { contentType: mimeType }),
+      `Storage upload ${storagePath}`,
+    );
     return {
       storagePath,
       size: bytes.byteLength,
@@ -276,6 +386,10 @@ class FirebaseVaultTransport implements VaultTransport {
     const recordRef = ref(db, rtdbLivePath(this.uid, input.id));
     const ctx = { uid: this.uid, id: input.id };
 
+    if (isElectronRenderer()) {
+      return this.publishRecordElectron(input, { size, sha256, content }, ctx);
+    }
+
     const result = await runTransaction(recordRef, (current: unknown) => {
       if (input.expectedClock === null) {
         if (current !== null && current !== undefined) {
@@ -293,9 +407,9 @@ class FirebaseVaultTransport implements VaultTransport {
 
       const currentCreatedAt =
         typeof current === 'object' &&
-        current !== null &&
-        'createdAt' in current &&
-        typeof (current as { createdAt: unknown }).createdAt === 'number'
+          current !== null &&
+          'createdAt' in current &&
+          typeof (current as { createdAt: unknown }).createdAt === 'number'
           ? (current as { createdAt: number }).createdAt
           : undefined;
 

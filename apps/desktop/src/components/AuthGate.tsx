@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { isFirebaseInitialized, useAuth } from '@yard-1/firebase';
 
 import { AuthPage } from '@/components/AuthPage';
+import { verboseLog } from '@/lib/verbose';
 
 interface AuthGateProps {
   children: ReactNode;
@@ -12,6 +13,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const { user, loading } = useAuth();
 
   if (!configured) {
+    verboseLog('auth', 'firebase not configured');
     return (
       <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-50 px-4 py-8 text-slate-900">
         <div className="w-full max-w-lg rounded-[2rem] border border-slate-200 bg-white/90 p-8 shadow-[0_24px_70px_-40px_rgba(14,116,144,0.35)] backdrop-blur">
@@ -29,6 +31,7 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (loading) {
+    verboseLog('auth', 'waiting for auth state');
     return (
       <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-50 px-4 py-8 text-slate-900">
         <div className="rounded-[2rem] border border-slate-200 bg-white/90 px-8 py-6 text-sm font-medium uppercase tracking-[0.24em] text-slate-500 shadow-sm backdrop-blur">
@@ -39,8 +42,10 @@ export function AuthGate({ children }: AuthGateProps) {
   }
 
   if (!user) {
+    verboseLog('auth', 'signed out');
     return <AuthPage />;
   }
 
+  verboseLog('auth', 'signed in', { uid: user.uid });
   return children;
 }
